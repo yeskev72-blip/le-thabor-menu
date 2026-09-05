@@ -5,23 +5,28 @@ Statut : validé
 
 ## Objectif
 
-Digitaliser la carte du restaurant Le Thabor. Le client consulte le menu sur son
-téléphone, compose sa commande, et l'envoie au restaurant via WhatsApp. Le
-restaurateur reçoit un message texte lisible dans la conversation qu'il utilise
-déjà. Aucun nouvel outil à apprendre pour lui.
+Digitaliser la carte du restaurant Le Thabor (Bénin, glacier et restaurant,
+« Enjoy Italian Taste »). Le client consulte le menu sur son téléphone, compose
+sa commande, et l'envoie au restaurant via WhatsApp. Le restaurateur reçoit un
+message texte lisible dans la conversation qu'il utilise déjà. Aucun nouvel
+outil à apprendre pour lui.
 
 ## Périmètre
 
 Dans le périmètre :
 
 - Consultation de la carte par catégories, sur mobile
-- Panier : ajout de plats, quantités, total
+- Choix d'une variante quand le plat en propose (taille de pizza, nombre de
+  boules de glace)
+- Choix d'un accompagnement et d'une sauce sur les plats concernés, avec
+  supplément facturé
+- Panier : ajout, quantités, total
 - Choix du mode de commande : sur place / à emporter / livraison
 - Champ de remarques libre et optionnel pour l'ensemble de la commande
 - Envoi de la commande via lien WhatsApp pré-rempli
 - Persistance du panier entre les rechargements de page
 
-Hors périmètre (à ne pas construire) :
+Hors périmètre :
 
 - Paiement en ligne
 - Comptes clients, authentification
@@ -29,6 +34,7 @@ Hors périmètre (à ne pas construire) :
   à la main
 - Gestion de stock, suivi de commande, historique
 - Calcul automatique des frais de livraison
+- Photos des plats
 
 ## Architecture
 
@@ -42,19 +48,37 @@ Conséquence directe de l'absence de backend : rien à sécuriser côté serveur
 rien à maintenir, coût d'hébergement nul. Le prix à payer est que la carte se
 met à jour par un commit, pas par une interface.
 
+## Identité visuelle
+
+Reprise du support imprimé : fond noir, magenta vif en couleur d'accent
+(échantillonné sur le logo), texte blanc. Le logo « Le Thabor » et sa signature
+« Enjoy Italian Taste » servent d'en-tête.
+
 ## Composants
 
 ### 1. `data/menu.ts` — la carte
 
-Source unique de vérité pour le contenu. Structure :
+Source unique de vérité pour le contenu.
 
 ```ts
+type Variante = {
+  nom: string;   // "Moyenne", "Grande", "2 boules"
+  prix: number;
+};
+
+type OptionsPlat = {
+  accompagnements: boolean; // propose la liste partagée des accompagnements
+  sauces: boolean;          // propose la liste partagée des sauces
+};
+
 type Plat = {
-  id: string;          // stable, sert de clé de panier
+  id: string;              // stable, sert de clé de panier
   nom: string;
   description?: string;
-  prix: number;        // entier, dans l'unité monétaire de base
-  disponible?: boolean; // défaut true ; false = affiché grisé, non commandable
+  prix?: number;           // plat à prix unique
+  variantes?: Variante[];  // plat à choix de taille ; exclusif avec prix
+  options?: OptionsPlat;   // accompagnement et sauce, si applicable
+  disponible?: boolean;    // défaut true ; false = affiché grisé, non commandable
 };
 
 type Categorie = {
@@ -64,23 +88,43 @@ type Categorie = {
 };
 ```
 
+Un plat porte soit `prix`, soit `variantes`, jamais les deux. Les `id` doivent
+rester stables : ils servent de clés dans le panier persisté.
+
+Les listes d'accompagnements et de sauces sont définies une seule fois, à part,
+et référencées par les plats via `options`. Elles sont communes à toute la carte.
+
 Un seul fichier à éditer pour changer un prix, ajouter un plat ou marquer une
-rupture. Les `id` doivent rester stables : ils servent de clés dans le panier
-persisté.
+rupture.
 
 ### 2. `lib/panier.ts` — l'état du panier
 
 Logique pure, sans dépendance à React ni au DOM, donc testable directement.
 
-- Ajouter un plat, incrémenter / décrémenter la quantité, retirer un plat
+Une ligne de panier est identifiée par la combinaison plat + variante +
+accompagnement + sauce. Deux ajouts du même plat avec des options différentes
+forment deux lignes distinctes ; avec des options identiques, ils incrémentent
+la même ligne.
+
+- Ajouter une ligne, incrémenter / décrémenter la quantité, retirer une ligne
+- Calculer le prix d'une ligne : prix de base (variante ou prix unique) plus les
+  suppléments, le tout multiplié par la quantité
 - Calculer le total
 - Sérialiser / désérialiser vers `localStorage`
 
-Au chargement, les entrées du panier persisté dont l'`id` n'existe plus dans la
-carte sont ignorées, silencieusement. Un plat retiré de la carte ne doit pas
-faire planter le panier d'un client revenu trois jours plus tard.
+Au chargement, les lignes persistées dont le plat ou la variante n'existent plus
+dans la carte sont ignorées, silencieusement. Un plat retiré de la carte ne doit
+pas faire planter le panier d'un client revenu trois jours plus tard.
 
-### 3. `lib/whatsapp.ts` — génération du message
+### 3. Règles de prix
+
+- Un accompagnement est inclus dans le prix du plat. Chaque accompagnement
+  supplémentaire ajoute 1 000 F.
+- Les sauces sont gratuites.
+- Sur les sandwichs et burgers, la portion de frites en supplément est un
+  accompagnement supplémentaire ordinaire, au même tarif de 1 000 F.
+
+### 4. `lib/whatsapp.ts` — génération du message
 
 Fonction pure : prend le panier, le mode de commande, les champs client et les
 remarques ; retourne l'URL `wa.me` complète.
@@ -92,26 +136,33 @@ Commande Le Thabor
 Mode : À emporter — retrait 19h30
 Client : Kofi
 
-2x Poulet braisé ......... 6 000
-1x Attiéké ............... 1 500
+2x Pizza Regina (Grande) ....... 9 000
+1x Poulet yassa ................ 5 000
+   Attiéké, sauce tomate
+1x Cornet 2 boules ............. 1 700
 
-TOTAL : 7 500 FCFA
+TOTAL : 15 700 FCFA
 
-Remarques : pas trop pimenté, sonner deux fois
+Remarques : pas trop pimenté
 ```
 
-Les lignes `Mode`, `Client` et `Remarques` s'adaptent au mode choisi et sont
-omises quand elles sont vides. Le corps est encodé via `encodeURIComponent`.
+Les variantes et options choisies apparaissent sous la ligne du plat. Les lignes
+`Mode`, `Client` et `Remarques` s'adaptent au mode et sont omises quand elles
+sont vides. Le corps est encodé via `encodeURIComponent`.
 
-### 4. Page menu (`/`)
+### 5. Page menu (`/`)
 
-Mobile-first. Liste des catégories, plats avec nom, description, prix et un
-bouton d'ajout. Barre de panier fixe en bas de l'écran affichant le nombre
-d'articles et le total, qui ouvre le panier au clic.
+Mobile-first. Navigation par catégories, plats avec nom, description et prix (ou
+fourchette de prix quand le plat a des variantes). Barre de panier fixe en bas
+de l'écran affichant le nombre d'articles et le total, qui ouvre le panier au
+clic.
 
-### 5. Panier
+Un plat sans variante ni option s'ajoute au panier en un seul geste. Un plat qui
+en a ouvre une feuille de choix avant l'ajout.
 
-Vue des lignes avec ajustement des quantités, total, puis :
+### 6. Panier
+
+Vue des lignes avec leurs options et ajustement des quantités, total, puis :
 
 - Sélecteur de mode : sur place / à emporter / livraison
 - Champs conditionnels au mode :
@@ -122,19 +173,26 @@ Vue des lignes avec ajustement des quantités, total, puis :
   commande
 - Bouton « Envoyer sur WhatsApp »
 
-Le bouton est désactivé tant que le panier est vide ou qu'un champ obligatoire
-du mode choisi n'est pas rempli.
+Le bouton est désactivé tant que le panier est vide ou qu'un champ obligatoire du
+mode choisi n'est pas rempli.
 
-## Flux
+## Contenu de la carte
 
-1. Le client scanne le QR code posé sur la table, ou ouvre le lien
-2. Il parcourt la carte et ajoute des plats au panier
-3. Il ouvre le panier, ajuste les quantités
-4. Il choisit son mode de commande et remplit les champs correspondants
-5. Il ajoute éventuellement une remarque
-6. Il clique sur « Envoyer sur WhatsApp » : WhatsApp s'ouvre avec le message
-   pré-rempli
-7. Il appuie sur envoyer. Le restaurateur répond dans la conversation.
+Extrait du PDF fourni le 2026-09-05, 17 catégories, environ 150 articles :
+
+Entrées · Pizzas (2 tailles) · Pâtes · Sandwichs & burgers · Plats de viande ·
+Plats de poissons & crustacés · Brochettes · Traditions · Glaces (coupes
+composées) · Boules (cornet, coupe, pot) · Milk-shakes · Suppléments glace ·
+Menu enfant · Jus de fruits · Cocktails sans alcool · Cocktails des tropiques ·
+Boissons froides
+
+Accompagnements partagés : frite, riz, pomme sautée, pomme vapeur, alloco,
+couscous, légumes, haricot vert, spaghetti, pâte de maïs, akassa, télibo,
+agbéli, pomme purée.
+
+Sauces partagées : poivre, champignons, citron, forestière, tomate.
+
+Prix en francs CFA, affichés sans décimale, séparateur de milliers par espace.
 
 ## Gestion des erreurs
 
@@ -142,7 +200,7 @@ du mode choisi n'est pas rempli.
 |---|---|
 | Panier vide | Bouton d'envoi désactivé |
 | Champ obligatoire manquant | Bouton désactivé, champ signalé |
-| Plat du panier absent de la carte | Ligne ignorée au chargement, sans erreur |
+| Plat ou variante absents de la carte | Ligne ignorée au chargement, sans erreur |
 | WhatsApp non installé | Le lien `wa.me` bascule sur WhatsApp Web dans le navigateur — comportement natif, rien à coder |
 | Message très long | Aucune troncature côté application ; les commandes réalistes restent bien en deçà des limites d'URL |
 
@@ -150,23 +208,25 @@ du mode choisi n'est pas rempli.
 
 Un fichier de test sur les deux modules de logique pure :
 
-- `lib/panier.ts` : ajout, incrément, décrément jusqu'à zéro, calcul du total,
-  filtrage des plats disparus de la carte
-- `lib/whatsapp.ts` : format du message pour chacun des trois modes, avec et
-  sans remarques, et vérification de l'encodage de l'URL
+- `lib/panier.ts` : ajout, fusion des lignes identiques, séparation des lignes
+  aux options différentes, incrément, décrément jusqu'à zéro, prix d'une ligne
+  avec supplément, total, filtrage des plats disparus de la carte
+- `lib/whatsapp.ts` : format du message pour chacun des trois modes, avec
+  variantes, avec options, avec et sans remarques, et encodage de l'URL
 
 Le reste — mise en page, rendu mobile — se vérifie à l'œil sur le site déployé.
 
-## Données à fournir
+## Points en attente
 
-Ces éléments manquent et bloquent la mise en production, pas le développement :
+Ne bloquent pas le développement, bloquent la mise en production :
 
-- Le contenu de la carte : catégories, plats, descriptions, prix
-- Le numéro WhatsApp du restaurant, au format international
-- La devise et le pays, qui fixent le formatage des prix et la langue
-
-En leur absence, le développement se fait sur une carte d'exemple et un numéro
-factice, tous deux remplacés à la livraison du contenu réel.
+- **Numéro WhatsApp du restaurant**, au format international. Un numéro factice
+  est utilisé en attendant.
+- **Prix à confirmer** : quatre pages du PDF sont des images en 189×267 pixels,
+  illisibles avec certitude. Concerne les cornets, coupes et pots de glace, les
+  cocktails des tropiques, les brochettes, les boissons froides, et le prix des
+  assortiments de tapas masqué par une photo. Les valeurs lues sont saisies
+  telles quelles et signalées en commentaire dans `data/menu.ts`.
 
 ## Évolutions possibles
 
@@ -175,4 +235,4 @@ Explicitement non construites aujourd'hui, notées pour mémoire :
 - Interface d'administration de la carte, si l'édition par commit devient une
   gêne réelle
 - Photos des plats
-- Version multilingue
+- Version anglaise
