@@ -15,6 +15,8 @@ import {
 } from "@/lib/panier";
 import ChoixPlat from "@/components/ChoixPlat";
 import PanierPanneau from "@/components/PanierPanneau";
+import Vignette from "@/components/Vignette";
+import Credits from "@/components/Credits";
 
 /** Un plat à variantes ou à options passe par la feuille de choix. */
 function demandeUnChoix(plat: Plat): boolean {
@@ -30,7 +32,8 @@ function libellePrix(plat: Plat): string {
 export default function Page() {
   const [panier, setPanier] = useState<Panier>([]);
   const [charge, setCharge] = useState(false);
-  const [platChoisi, setPlatChoisi] = useState<Plat | null>(null);
+  // Le plat ouvert dans la feuille, avec la photo de repli de sa catégorie.
+  const [choix, setChoix] = useState<{ plat: Plat; image?: string } | null>(null);
   const [panierOuvert, setPanierOuvert] = useState(false);
 
   // Le panier est lu après le montage : le serveur ne connaît pas localStorage.
@@ -45,7 +48,7 @@ export default function Page() {
 
   const ajouterLigne = (ligne: Ligne) => {
     setPanier((p) => ajouter(p, ligne));
-    setPlatChoisi(null);
+    setChoix(null);
   };
 
   const articles = nombreArticles(panier);
@@ -81,6 +84,7 @@ export default function Page() {
                 const indisponible = plat.disponible === false;
                 return (
                   <li key={plat.id} className="flex items-start gap-3 py-3">
+                    <Vignette plat={plat} imageCategorie={categorie.image} />
                     <div className="min-w-0 flex-1">
                       <p className={`font-medium ${indisponible ? "text-muted" : ""}`}>
                         {plat.nom}
@@ -94,7 +98,7 @@ export default function Page() {
                       disabled={indisponible}
                       onClick={() =>
                         demandeUnChoix(plat)
-                          ? setPlatChoisi(plat)
+                          ? setChoix({ plat, image: categorie.image })
                           : ajouterLigne({
                               platId: plat.id,
                               accompagnements: [],
@@ -112,6 +116,7 @@ export default function Page() {
             </ul>
           </section>
         ))}
+        <Credits />
       </main>
 
       {articles > 0 && !panierOuvert && (
@@ -130,10 +135,11 @@ export default function Page() {
         </div>
       )}
 
-      {platChoisi && (
+      {choix && (
         <ChoixPlat
-          plat={platChoisi}
-          onFermer={() => setPlatChoisi(null)}
+          plat={choix.plat}
+          imageCategorie={choix.image}
+          onFermer={() => setChoix(null)}
           onAjouter={ajouterLigne}
         />
       )}

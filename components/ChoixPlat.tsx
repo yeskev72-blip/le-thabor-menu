@@ -10,14 +10,17 @@ import {
 import { formatPrix } from "@/lib/config";
 import { type Ligne, prixLigne } from "@/lib/panier";
 import Feuille from "./Feuille";
+import Vignette from "./Vignette";
 
 /** Feuille de choix ouverte avant l'ajout d'un plat à variantes ou à options. */
 export default function ChoixPlat({
   plat,
+  imageCategorie,
   onFermer,
   onAjouter,
 }: {
   plat: Plat;
+  imageCategorie?: string;
   onFermer: () => void;
   onAjouter: (ligne: Ligne) => void;
 }) {
@@ -46,7 +49,10 @@ export default function ChoixPlat({
         </button>
       }
     >
-      {plat.description && <p className="mb-5 text-sm text-muted">{plat.description}</p>}
+      <div className="mb-5 flex items-center gap-4">
+        <Vignette plat={plat} imageCategorie={imageCategorie} taille={96} />
+        {plat.description && <p className="text-sm text-muted">{plat.description}</p>}
+      </div>
 
       {plat.variantes && (
         <fieldset className="mb-6">
